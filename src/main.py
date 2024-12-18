@@ -99,6 +99,8 @@ DIGITS = '0123456789'
 LETTERS = string.ascii_letters
 VALID_IDENTIFIERS = LETTERS + DIGITS + "$_"
 
+global_variables = {}
+
 #######################################
 # ERRORS
 #######################################
@@ -360,6 +362,7 @@ KEYWORDS = [
   'return',
   'continue',
   'break',
+  "pass",
   'import',
   'do',
   'try',
@@ -370,6 +373,7 @@ KEYWORDS = [
   'switch',
   'case',
   'const',
+  'global',
   'namespace',
 ]
 
@@ -664,17 +668,18 @@ class VarAccessNode:
     self.pos_end = self.var_name_tok.pos_end
 
 class VarAssignNode:
-  def __init__(self, var_name_tok, value_node, is_const=False):
+  def __init__(self, var_name_tok, value_node, is_const=False, is_global=False):
     self.var_name_tok = var_name_tok
     self.value_node = value_node
     self.is_const = is_const
+    self.is_global = is_global
 
     self.pos_start = self.var_name_tok.pos_start
     self.pos_end = self.value_node.pos_end
   
   def __repr__(self):
-    const = "CONST " if self.is_const else ""
-    return f"({const}{self.var_name_tok} = {self.value_node!r})"
+    const_global = "CONST " if self.is_const  else "GLOBAL" if self.is_global else ""
+    return f"({const_global}{self.var_name_tok} = {self.value_node!r})"
 
 class BinOpNode:
   def __init__(self, left_node, op_tok, right_node):
@@ -771,6 +776,11 @@ class ContinueNode:
     self.pos_end = pos_end
 
 class BreakNode:
+  def __init__(self, pos_start, pos_end):
+    self.pos_start = pos_start
+    self.pos_end = pos_end
+
+class PassNode:
   def __init__(self, pos_start, pos_end):
     self.pos_start = pos_start
     self.pos_end = pos_end
@@ -1028,6 +1038,10 @@ class Parser:
       self.advance(res)
       return res.success(BreakNode(pos_start, self.current_tok.pos_start.copy()))
     
+    if self.current_tok.matches(TokenType.KEYWORD, 'pass'):
+      self.advance(res)
+      return res.success(PassNode(pos_start, self.current_tok.pos_start.copy()))
+    
     if self.current_tok.matches(TokenType.KEYWORD, 'import'):
       self.advance(res)
 
@@ -1089,7 +1103,33 @@ class Parser:
       assign_expr = res.register(self.expr())
       if res.error: return res
 
-      return res.success(VarAssignNode(identifier, assign_expr, is_const=True))
+      return res.success(VarAssignNode(identifier, assign_expr, is_const=True, is_global=False))
+    
+    if self.current_tok.matches(TokenType.KEYWORD, "global"):
+      self.advance(res)
+
+      if self.current_tok.type != TokenType.IDENTIFIER:
+        return res.failure(InvalidSyntaxError(
+          self.current_tok.pos_start, self.current_tok.pos_end,
+          "Expected identifier"
+        ))
+
+      identifier = self.current_tok
+
+      self.advance(res)
+
+      if self.current_tok.type != TokenType.EQ:
+        return res.failure(InvalidSyntaxError(
+          self.current_tok.pos_start, self.current_tok.pos_end,
+          "Expected '='"
+        ))
+      
+      self.advance(res)
+
+      assign_expr = res.register(self.expr())
+      if res.error: return res
+
+      return res.success(VarAssignNode(identifier, assign_expr, is_const=False, is_global=True))
 
     node = res.register(self.bin_op(self.comp_expr, ((TokenType.KEYWORD, 'and'), (TokenType.KEYWORD, 'or'))))
 
@@ -1865,7 +1905,7 @@ class Parser:
     if not self.current_tok.matches(TokenType.KEYWORD, 'end'):
       return res.failure(InvalidSyntaxError(
         self.current_tok.pos_start, self.current_tok.pos_end,
-        "Expected 'end', 'return', 'continue', 'break', 'if', 'for', 'while', 'function', 'namespace', int, float, identifier, '+', '-', '(', '[', '{' or 'not'"
+        "Expected 'end', 'return', 'continue', 'break', 'pass', 'if', 'for', 'while', 'function', 'namespace', int, float, identifier, '+', '-', '(', '[', '{' or 'not'"
       ))
     
     pos_end = self.current_tok.pos_end.copy()
@@ -1882,7 +1922,7 @@ class Parser:
     if not self.current_tok.matches(TokenType.KEYWORD, 'catch'):
       return res.failure(InvalidSyntaxError(
         self.current_tok.pos_start, self.current_tok.pos_end,
-        "Expected 'catch', 'return', 'continue', 'break', 'if', 'for', 'while', 'function', 'namespace', int, float, identifier, '+', '-', '(', '[', '{' or 'not'"
+        "Expected 'catch', 'return', 'continue', 'break', 'pass', 'if', 'for', 'while', 'function', 'namespace', int, float, identifier, '+', '-', '(', '[', '{' or 'not'"
       ))
     
     self.advance(res)
@@ -1921,7 +1961,7 @@ class Parser:
       if not self.current_tok.matches(TokenType.KEYWORD, 'end'):
         return res.failure(InvalidSyntaxError(
           self.current_tok.pos_start, self.current_tok.pos_end,
-          "Expected 'end', 'return', 'continue', 'break', 'if', 'for', 'while', 'function', 'namespace', int, float, identifier, '+', '-', '(', '[', '{' or 'not'"
+          "Expected 'end', 'return', 'continue', 'break', 'pass', 'if', 'for', 'while', 'function', 'namespace', int, float, identifier, '+', '-', '(', '[', '{' or 'not'"
         ))
       
       self.advance(res)
@@ -1993,7 +2033,7 @@ class Parser:
     if not self.current_tok.matches(TokenType.KEYWORD, 'end'):
       return res.failure(InvalidSyntaxError(
         self.current_tok.pos_start, self.current_tok.pos_end,
-        "Expected 'end', 'return', 'continue', 'break', 'if', 'for', 'while', 'function', 'namespace', int, float, identifier, '+', '-', '(', '[', '{' or 'not'"
+        "Expected 'end', 'return', 'continue', 'break', 'pass', 'if', 'for', 'while', 'function', 'namespace', int, float, identifier, '+', '-', '(', '[', '{' or 'not'"
       ))
     
     pos_end = self.current_tok.pos_end.copy()
@@ -2033,12 +2073,14 @@ class RTResult:
     self.func_return_value = None
     self.loop_should_continue = False
     self.loop_should_break = False
+    self.loop_should_pass = False
 
   def register(self, res):
     self.error = res.error
     self.func_return_value = res.func_return_value
     self.loop_should_continue = res.loop_should_continue
     self.loop_should_break = res.loop_should_break
+    self.loop_should_pass = res.loop_should_pass
     return res.value
 
   def success(self, value):
@@ -2059,6 +2101,11 @@ class RTResult:
   def success_break(self):
     self.reset()
     self.loop_should_break = True
+    return self
+  
+  def success_pass(self):
+    self.reset()
+    self.loop_should_pass = True
     return self
 
   def failure(self, error):
@@ -2085,25 +2132,25 @@ class Number(Value):
     self.value = value
 
   def added_to(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, BaseFunction):
       return Number(self.value + other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
 
   def subbed_by(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, BaseFunction):
       return Number(self.value - other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
 
   def multed_by(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, BaseFunction):
       return Number(self.value * other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
 
   def dived_by(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, BaseFunction):
       if other.value == 0:
         return None, RTError(
           other.pos_start, other.pos_end,
@@ -2116,61 +2163,61 @@ class Number(Value):
       return None, Value.illegal_operation(self, other)
 
   def powed_by(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, BaseFunction):
       return Number(self.value ** other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
 
   def percent_by(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, BaseFunction):
       return Number(self.value % other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
 
   def get_comparison_eq(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String) or isinstance(other, BaseFunction):
       return Number(self.value == other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
 
   def get_comparison_ne(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String) or isinstance(other, BaseFunction):
       return Number(self.value != other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
 
   def get_comparison_lt(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String) or isinstance(other, BaseFunction):
       return Number(self.value < other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
 
   def get_comparison_gt(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String) or isinstance(other, BaseFunction):
       return Number(self.value > other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
 
   def get_comparison_lte(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String) or isinstance(other, BaseFunction):
       return Number(self.value <= other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
 
   def get_comparison_gte(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String) or isinstance(other, BaseFunction):
       return Number(self.value >= other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
 
   def anded_by(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String) or isinstance(other, BaseFunction):
       return Number(self.value and other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
 
   def ored_by(self, other):
-    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String):
+    if isinstance(other, Bin) or isinstance(other, Number) or isinstance(other, Bytes) or isinstance(other, String) or isinstance(other, BaseFunction):
       return Number(self.value or other.value).set_context(self.context), None
     else:
       return None, Value.illegal_operation(self, other)
@@ -3012,7 +3059,7 @@ class BuiltInFunction(BaseFunction):
           f"{err.args[-1]}",
           exec_ctx
         ))
-    
+
     fd = f.fileno()
     files[fd] = f
 
@@ -3119,7 +3166,7 @@ class BuiltInFunction(BaseFunction):
         f"Invalid file descriptor '{fd}'",
         exec_ctx
       ))
-    
+
     del files[fd]
 
     return res.success(Number.null)
@@ -3279,11 +3326,20 @@ class SymbolTable:
     self.symbols = {}
     self.parent = parent
     self.const = set()
+    self.globall = set()
 
   def get(self, name):
     value = self.symbols.get(name, None)
     if value == None and self.parent:
       return self.parent.get(name)
+    return value
+  
+  def get_global(self, name):
+    global global_variables
+    
+    value = global_variables[name]
+    if value == None and self.parent:
+      return self.parent.get_global(name)
     return value
 
   def set(self, name, value):
@@ -3292,6 +3348,12 @@ class SymbolTable:
   def set_const(self, name, value):
     self.symbols[name] = value
     self.const.add(name)
+
+  def set_global(self, name, value):
+    global global_variables
+
+    global_variables[name] = value
+    self.globall.add(name)
 
   def remove(self, name):
     del self.symbols[name]
@@ -3343,9 +3405,16 @@ class Interpreter:
     )
 
   def visit_VarAccessNode(self, node, context):
+    global global_variables
+
     res = RTResult()
     var_name = node.var_name_tok.value
-    value = context.symbol_table.get(var_name)
+    value = None
+
+    if var_name in global_variables:
+      value = context.symbol_table.get_global(var_name)
+    else:
+        value = context.symbol_table.get(var_name)
 
     if not value:
       return res.failure(RTError(
@@ -3365,6 +3434,8 @@ class Interpreter:
 
     if node.is_const:
       method = context.symbol_table.set_const
+    elif node.is_global:
+      method = context.symbol_table.set_global
     else:
       method = context.symbol_table.set
     
@@ -3492,6 +3563,9 @@ class Interpreter:
       if res.loop_should_break:
         break
 
+      if res.loop_should_pass:
+        pass
+
       elements.append(value)
 
     return res.success(
@@ -3518,6 +3592,9 @@ class Interpreter:
       
       if res.loop_should_break:
         break
+        
+      if res.loop_should_pass:
+        pass
 
       elements.append(value)
 
@@ -3581,6 +3658,9 @@ class Interpreter:
 
   def visit_BreakNode(self, node, context):
     return RTResult().success_break()
+  
+  def visit_PassNode(self, node, context):
+    return RTResult().success_pass()
   
   def visit_ImportNode(self, node, context):
     res = RTResult()
